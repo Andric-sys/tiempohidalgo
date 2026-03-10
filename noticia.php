@@ -1,10 +1,10 @@
 <?php
 require 'config.php';
-include 'header.php';
 
 $noticia_id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 
 if ($noticia_id === 0) {
+    include 'header.php';
     ?>
     <section class="noticias-section">
         <p class="sin-noticias">Noticia no encontrada</p>
@@ -22,6 +22,7 @@ $stmt->execute();
 $result = $stmt->get_result();
 
 if ($result->num_rows === 0) {
+    include 'header.php';
     ?>
     <section class="noticias-section">
         <p class="sin-noticias">Noticia no encontrada</p>
@@ -33,19 +34,48 @@ if ($result->num_rows === 0) {
 
 $noticia = $result->fetch_assoc();
 
-// Incrementar contador de vistas y reflejarlo en la respuesta actual
-$sql = "UPDATE noticias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?";
-$stmt = $conn->prepare($sql);
-$stmt->bind_param('i', $noticia_id);
-$stmt->execute();
-$noticia['vistas'] = isset($noticia['vistas']) ? ((int)$noticia['vistas'] + 1) : 1;
-
-// Obtener bloques
+// Obtener bloques para la meta descripción
 $sql = "SELECT * FROM bloques WHERE noticia_id = ? ORDER BY orden ASC";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param('i', $noticia_id);
 $stmt->execute();
 $bloques = $stmt->get_result();
+
+// Obtener primera imagen para Open Graph
+$noticia_og_imagen = '';
+$bloques_temp = $bloques->fetch_all(MYSQLI_ASSOC);
+foreach ($bloques_temp as $bloque) {
+    if ($bloque['tipo'] === 'imagen') {
+        $noticia_og_imagen = APP_URL . '/' . $bloque['contenido'];
+        break;
+    }
+}
+
+// Obtener descripción
+$noticia_og_descripcion = '';
+foreach ($bloques_temp as $bloque) {
+    if ($bloque['tipo'] === 'parrafo') {
+        $noticia_og_descripcion = substr(strip_tags($bloque['contenido']), 0, 200);
+        break;
+    }
+}
+
+// Preparar datos para Open Graph en header
+$noticia_og_titulo = $noticia['titulo'];
+$noticia_og_url = APP_URL . '/noticia.php?id=' . $noticia_id;
+if (empty($noticia_og_descripcion)) {
+    $noticia_og_descripcion = $noticia['titulo'];
+}
+
+// AHORA SÍ incluir header con los meta tags ya listos
+include 'header.php';
+?>
+// Incrementar contador de vistas
+$sql = "UPDATE noticias SET vistas = COALESCE(vistas, 0) + 1 WHERE id = ?";
+$stmt = $conn->prepare($sql);
+$stmt->bind_param('i', $noticia_id);
+$stmt->execute();
+$noticia['vistas'] = isset($noticia['vistas']) ? ((int)$noticia['vistas'] + 1) : 1;
 ?>
 
 <style>
@@ -141,20 +171,29 @@ $bloques = $stmt->get_result();
         transition: transform 0.3s;
     }
 
-    .share-btn:hover {
-        transform: scale(1.1);
+    .noticia-share p {
+        margin: 0 0 15px 0;
     }
-
-    .share-btn.facebook {
-        background: #3b5998;
+    
+    /* Estilos para botones de compartir */
+    .noticia-share a {
+        transition: all 0.3s ease !important;
     }
-
-    .share-btn.twitter {
-        background: #1da1f2;
+    
+    .noticia-share a:hover {
+        text-decoration: none !important;
     }
-
-    .share-btn.whatsapp {
-        background: #25d366;
+    
+    @media (max-width: 768px) {
+        .noticia-share div {
+            flex-direction: column;
+        }
+        
+        .noticia-share a {
+            width: 100%;
+            justify-content: center;
+            text-align: center;
+        }
     }
 
     .back-button {
@@ -233,8 +272,8 @@ $bloques = $stmt->get_result();
 
     <div class="noticia-completa-body">
         <?php
-        if ($bloques->num_rows > 0) {
-            while ($bloque = $bloques->fetch_assoc()) {
+        if (count($bloques_temp) > 0) {
+            foreach ($bloques_temp as $bloque) {
                 if ($bloque['tipo'] === 'imagen') {
                     ?>
                     <div class="bloque-imagen">
@@ -254,19 +293,57 @@ $bloques = $stmt->get_result();
     </div>
 
     <div class="noticia-share">
-        <?php $url_actual = APP_URL . '/noticia.php?id=' . (int)$noticia_id; ?>
-        <div class="share-buttons">
-            <label><i class="fas fa-share"></i> Compartir:</label>
-            <a href="https://www.facebook.com/sharer/sharer.php?u=<?php echo urlencode($url_actual); ?>" class="share-btn facebook" target="_blank" title="Compartir en Facebook">
-                <i class="fab fa-facebook"></i>
+        <p style="color: #333; margin-bottom: 15px; font-weight: bold;">
+            <i class="fas fa-share"></i> Compartir en Redes Sociales:
+        </p>
+        
+        <?php 
+        $url_actual = htmlspecialchars(APP_URL . '/noticia.php?id=' . (int)$noticia_id);
+        $titulo_noticia = htmlspecialchars($noticia['titulo']);
+        ?>
+        
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+            <!-- Facebook -->
+            <a href="https://www.facebook.com/sharer/sharer.php?u=<?php echo urlencode($url_actual); ?>" 
+               target="_blank" rel="noopener noreferrer"
+               style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; background: #1877F2; color: white; border-radius: 6px; text-decoration: none; font-weight: 600; transition: all 0.3s; cursor: pointer;"
+               onmouseover="this.style.background='#165ac3'; this.style.transform='scale(1.05)'"
+               onmouseout="this.style.background='#1877F2'; this.style.transform='scale(1)'">
+                <i class="fab fa-facebook" style="font-size: 18px;"></i> Facebook
             </a>
-            <a href="https://twitter.com/intent/tweet?url=<?php echo urlencode($url_actual); ?>&text=<?php echo urlencode($noticia['titulo']); ?>" class="share-btn twitter" target="_blank" title="Compartir en Twitter">
-                <i class="fab fa-twitter"></i>
+            
+            <!-- Instagram -->
+            <a href="https://www.instagram.com/" 
+               target="_blank" rel="noopener noreferrer"
+               title="Copia el enlace y comparte en Instagram"
+               style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; background: #E4405F; color: white; border-radius: 6px; text-decoration: none; font-weight: 600; transition: all 0.3s; cursor: pointer;"
+               onmouseover="this.style.background='#d63250'; this.style.transform='scale(1.05)'"
+               onmouseout="this.style.background='#E4405F'; this.style.transform='scale(1)'"
+               onclick="copiarEnlace(event, '<?php echo $url_actual; ?>')">
+                <i class="fab fa-instagram" style="font-size: 18px;"></i> Instagram
             </a>
-            <a href="https://api.whatsapp.com/send?text=<?php echo urlencode($noticia['titulo'] . ' ' . $url_actual); ?>" class="share-btn whatsapp" target="_blank" title="Compartir en WhatsApp">
-                <i class="fab fa-whatsapp"></i>
+            
+            <!-- Twitter/X -->
+            <a href="https://twitter.com/intent/tweet?url=<?php echo urlencode($url_actual); ?>&text=<?php echo urlencode($titulo_noticia); ?>" 
+               target="_blank" rel="noopener noreferrer"
+               style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; background: #000000; color: white; border-radius: 6px; text-decoration: none; font-weight: 600; transition: all 0.3s; cursor: pointer;"
+               onmouseover="this.style.background='#333333'; this.style.transform='scale(1.05)'"
+               onmouseout="this.style.background='#000000'; this.style.transform='scale(1)'">
+                <i class="fab fa-x-twitter" style="font-size: 18px;"></i> X (Twitter)
             </a>
         </div>
+        
+        <script>
+            function copiarEnlace(event, url) {
+                event.preventDefault();
+                // Copiar al portapapeles
+                navigator.clipboard.writeText(url).then(function() {
+                    alert('Enlace copiado! Pegalo en tu historia de Instagram');
+                }).catch(function() {
+                    alert('No se pudo copiar. Copia este enlace manualmente: ' + url);
+                });
+            }
+        </script>
     </div>
 </div>
 
