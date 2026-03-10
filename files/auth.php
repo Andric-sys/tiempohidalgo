@@ -12,6 +12,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
+    // Si no existe ningun usuario, crear el primero automaticamente
+    $count_sql = "SELECT COUNT(*) AS total FROM usuarios";
+    $count_result = $conn->query($count_sql);
+
+    if ($count_result) {
+        $count_row = $count_result->fetch_assoc();
+        $total_usuarios = isset($count_row['total']) ? (int)$count_row['total'] : 0;
+
+        if ($total_usuarios === 0) {
+            $contrasena_hash = password_hash($contrasena, PASSWORD_DEFAULT);
+            $insert_sql = "INSERT INTO usuarios (usuario, contrasena) VALUES (?, ?)";
+            $insert_stmt = $conn->prepare($insert_sql);
+            $insert_stmt->bind_param('ss', $usuario, $contrasena_hash);
+
+            if ($insert_stmt->execute()) {
+                $_SESSION['usuario'] = $usuario;
+                $_SESSION['usuario_id'] = $insert_stmt->insert_id;
+                $_SESSION['login_time'] = time();
+                $_SESSION['mensaje'] = 'Usuario inicial creado correctamente';
+                $_SESSION['tipo_mensaje'] = 'exito';
+
+                header('Location: admin.php');
+                exit();
+            }
+
+            $_SESSION['error'] = 'No se pudo crear el usuario inicial. Intenta de nuevo.';
+            header('Location: login.php');
+            exit();
+        }
+    }
+
     // Buscar usuario por nombre
     $sql = "SELECT id, usuario, contrasena, estado FROM usuarios WHERE usuario = ?";
     
