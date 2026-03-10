@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config.php';
+require_once '../social_media_api.php';
 
 // Verificar si el usuario está autenticado
 if (!isset($_SESSION['usuario'])) {
@@ -100,6 +101,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $mensaje = 'Noticia agregada correctamente con ' . $bloques_insertados . ' bloque(s)';
                     $tipo_mensaje = 'exito';
                     $url_noticia_publicada = APP_URL . '/noticia.php?id=' . $noticia_id;
+                    
+                    // ============================================
+                    // INTEGRACIÓN CON REDES SOCIALES
+                    // ============================================
+                    $publicar_en_redes = [
+                        'facebook' => isset($_POST['publicar_facebook']) && $_POST['publicar_facebook'] === 'on',
+                        'instagram' => isset($_POST['publicar_instagram']) && $_POST['publicar_instagram'] === 'on',
+                        'twitter' => isset($_POST['publicar_twitter']) && $_POST['publicar_twitter'] === 'on'
+                    ];
+
+                    // Solo procesar si al menos una red está seleccionada
+                    if (in_array(true, $publicar_en_redes)) {
+                        // Obtener la primera imagen de los bloques
+                        $sql_imagen = "SELECT contenido FROM bloques WHERE noticia_id = ? AND tipo = 'imagen' ORDER BY orden LIMIT 1";
+                        $stmt_img = $conn->prepare($sql_imagen);
+                        $stmt_img->bind_param('i', $noticia_id);
+                        $stmt_img->execute();
+                        $resultado_img = $stmt_img->get_result();
+                        $imagen_url = '';
+                        
+                        if ($fila_img = $resultado_img->fetch_assoc()) {
+                            // Construir URL completa de la imagen
+                            $imagen_url = APP_URL . '/' . $fila_img['contenido'];
+                        }
+
+                        // Obtener descripción (primer párrafo o un resumen)
+                        $sql_desc = "SELECT contenido FROM bloques WHERE noticia_id = ? AND tipo = 'parrafo' ORDER BY orden LIMIT 1";
+                        $stmt_desc = $conn->prepare($sql_desc);
+                        $stmt_desc->bind_param('i', $noticia_id);
+                        $stmt_desc->execute();
+                        $resultado_desc = $stmt_desc->get_result();
+                        $descripcion = '';
+                        
+                        if ($fila_desc = $resultado_desc->fetch_assoc()) {
+                            $descripcion = SocialMediaAPI::generarResumen($titulo, $fila_desc['contenido']);
+                        } else {
+                            $descripcion = substr($titulo, 0, 150) . '...';
+                        }
+
+                        // Publicar en todas las redes seleccionadas
+                        $resultados_redes = publicarEnTodasLasRedes(
+                            $noticia_id,
+                            $titulo,
+                            $descripcion,
+                            $imagen_url,
+                            $url_noticia_publicada,
+                            $publicar_en_redes
+                        );
+
+                        // Actualizar flag de publicación en redes
+                        $sql_update = "UPDATE noticias SET publicado_redes = true, fecha_publicacion_redes = NOW() WHERE id = ?";
+                        $stmt_update = $conn->prepare($sql_update);
+                        $stmt_update->bind_param('i', $noticia_id);
+                        $stmt_update->execute();
+
+                        // Agregar información de publicación al mensaje
+                        $redes_publicadas = [];
+                        foreach ($resultados_redes as $red => $resultado) {
+                            if (isset($resultado['success']) && $resultado['success']) {
+                                $redes_publicadas[] = ucfirst($red);
+                            }
+                        }
+                        
+                        if (!empty($redes_publicadas)) {
+                            $mensaje .= ' y publicado en: ' . implode(', ', $redes_publicadas);
+                        }
+                    }
                     
                     // Limpiar el formulario
                     $_POST = array();
@@ -437,6 +505,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <button type="button" class="btn btn-parrafo" onclick="agregarBloque('parrafo')">
                         <i class="fas fa-paragraph"></i> Agregar Párrafo
                     </button>
+                </div>
+            </div>
+
+            <!-- SECCIÓN DE REDES SOCIALES -->
+            <div class="bloques-container" style="background: #f0f8ff;">
+                <h3><i class="fas fa-share-alt"></i> Publicar en Redes Sociales</h3>
+                <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                    Selecciona las redes en las que deseas publicar automáticamente esta noticia:
+                </p>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    <div class="checkbox-container" style="margin: 0; padding: 12px; background: white; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="checkbox" id="publicar_facebook" name="publicar_facebook" value="on">
+                        <label for="publicar_facebook" style="margin: 0;">
+                            <i class="fab fa-facebook" style="color: #1877F2;"></i> Facebook
+                        </label>
+                    </div>
+                    
+                    <div class="checkbox-container" style="margin: 0; padding: 12px; background: white; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="checkbox" id="publicar_instagram" name="publicar_instagram" value="on">
+                        <label for="publicar_instagram" style="margin: 0;">
+                            <i class="fab fa-instagram" style="color: #E4405F;"></i> Instagram
+                        </label>
+                    </div>
+                    
+                    <div class="checkbox-container" style="margin: 0; padding: 12px; background: white; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="checkbox" id="publicar_twitter" name="publicar_twitter" value="on">
+                        <label for="publicar_twitter" style="margin: 0;">
+                            <i class="fab fa-x-twitter" style="color: #000;"></i> X (Twitter)
+                        </label>
+                    </div>
+                </div>
+
+                <div style="background: #fff3cd; padding: 10px; margin-top: 15px; border-left: 4px solid #ffc107; border-radius: 4px; font-size: 13px; color: #856404;">
+                    <i class="fas fa-info-circle"></i> <strong>Nota:</strong> Asegúrate de haber configurado las credenciales de las redes sociales antes de activar esta opción.
                 </div>
             </div>
 
